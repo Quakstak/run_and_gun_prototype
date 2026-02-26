@@ -63,6 +63,7 @@ class Game:
 
         self.bullets = pygame.sprite.Group()
         self.boss_bullets = pygame.sprite.Group()
+        self.enemy_bullets = pygame.sprite.Group()
 
         self.load_level(self.level_index, f"level{self.level_index}.csv")
 
@@ -148,8 +149,11 @@ class Game:
         for b in list(self.boss_bullets):
             b.update(dt, self.level)
 
+        for b in list(self.enemy_bullets):
+            b.update(dt, self.level)    
+
         # Update level entities and bullet hits
-        self.level.update(dt, self.player, self.bullets, self.boss_bullets)
+        self.level.update(dt, self.player, self.bullets, self.boss_bullets, self.enemy_bullets)
 
         # --- Player vs pickups
         hit_pickups = pygame.sprite.spritecollide(self.player, self.level.pickups, dokill=True)
@@ -178,6 +182,17 @@ class Game:
                 if b.rect.colliderect(self.player.rect):
                     b.kill()
             self.player.take_damage(settings.BOSS_DAMAGE)
+            if self.player.invuln_time > 0.0 and not settings.SOUND_OFF:
+                self.sfx_hurt.play()
+
+        # --- Player vs enemy bullets ---
+        if pygame.sprite.spritecollideany(self.player, self.enemy_bullets):
+            for b in list(self.enemy_bullets):
+                if b.rect.colliderect(self.player.rect):
+                    b.kill()
+
+            self.player.take_damage(settings.ENEMY_DAMAGE)
+
             if self.player.invuln_time > 0.0 and not settings.SOUND_OFF:
                 self.sfx_hurt.play()
 
@@ -241,6 +256,9 @@ class Game:
             self.world.blit(b.image, (b.rect.x - self.camera_x, b.rect.y - self.camera_y))
 
         for b in self.boss_bullets:
+            self.world.blit(b.image, (b.rect.x - self.camera_x, b.rect.y - self.camera_y))
+
+        for b in self.enemy_bullets:
             self.world.blit(b.image, (b.rect.x - self.camera_x, b.rect.y - self.camera_y))
 
         # Player (blink if invulnerable)

@@ -106,7 +106,7 @@ class Player(pygame.sprite.Sprite):
     def try_shoot(self, bullets_group: pygame.sprite.Group) -> bool:
         muzzle = pygame.Vector2(
             self.rect.centerx + 16 * self.facing,
-            self.rect.centery - 6
+            self.rect.centery + 4
         )
         before = len(bullets_group)
         self.weapon.shoot(bullets_group, muzzle, self.facing)

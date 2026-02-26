@@ -12,7 +12,7 @@ import csv
 import pygame
 from .utils import asset_path, load_image
 from . import settings
-from .enemies import NormalEnemy, BossEnemy
+from .enemies import NormalEnemy, ShooterEnemy, BossEnemy
 from .pickup import PickUp
 
 
@@ -25,6 +25,7 @@ class Level:
     SOLID_02 = 2
     SOLID_03 = 3
     SOLID_04 = 4
+    SOLID_05 = 5
 
     # Example “spawn” tiles (not drawn, not solid)
     PLAYER_SPAWN = 90
@@ -32,6 +33,7 @@ class Level:
     PICKUP_HEALTH = 92
     BOSS_SPAWN   = 93
     EXIT_FLAG    = 94
+    SHOOTER_ENEMY_SPAWN = 95
 
     def __init__(self, csv_name: str):
         self.csv_name = csv_name
@@ -43,11 +45,11 @@ class Level:
         self.tiles = self.slice_tilesheet(self.tilesheet, settings.TILE_SIZE)
 
         # Decide which tile IDs are solid (collidable)
-        self.solid_ids = {self.SOLID_01, self.SOLID_02, self.SOLID_03}
+        self.solid_ids = {self.SOLID_01, self.SOLID_02, self.SOLID_03, self.SOLID_05}
 
         # Decide which tile IDs should be drawn as tiles (usually same as “visual tiles”)
         # Note: spawn IDs are typically NOT drawn.
-        self.draw_ids = {self.SOLID_01, self.SOLID_02, self.SOLID_03, self.SOLID_04}
+        self.draw_ids = {self.SOLID_01, self.SOLID_02, self.SOLID_03, self.SOLID_04, self.SOLID_05}
 
         # Map “tile ID in the level” -> “index into tilesheet”
         #
@@ -61,6 +63,7 @@ class Level:
             self.SOLID_02: 88,
             self.SOLID_03: 89,
             self.SOLID_04: 74,
+            self.SOLID_05: 98,
         }
 
         self.grid: list[list[int]] = []
@@ -173,6 +176,10 @@ class Level:
                         tile_size,
                         tile_size
                     )
+                elif tile_id == self.SHOOTER_ENEMY_SPAWN:
+                    enemy_height = 32
+                    spawn_y = world_y - (enemy_height - tile_size)
+                    self.enemies.add(ShooterEnemy((world_x, spawn_y)))
 
     def get_solid_hits(self, rect: pygame.Rect) -> list[pygame.Rect]:
         return [r for r in self.solid_rects if r.colliderect(rect)]
@@ -180,9 +187,13 @@ class Level:
     def rect_collides_solid(self, rect: pygame.Rect) -> bool:
         return any(r.colliderect(rect) for r in self.solid_rects)
 
-    def update(self, dt: float, player, bullets, boss_bullets) -> None:
+    def update(self, dt: float, player, bullets, boss_bullets, enemy_bullets) -> None:
         for e in list(self.enemies):
-            e.update(dt, self, player)
+            # Shooter enemies expect enemy_bullets
+            if hasattr(e, "weapon"):
+                e.update(dt, self, player, enemy_bullets)
+            else:
+                e.update(dt, self, player)
 
         if self.boss and self.boss.alive():
             self.boss.update(dt, self, player, boss_bullets)
