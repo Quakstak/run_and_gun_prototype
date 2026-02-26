@@ -10,19 +10,25 @@ from .level import Level
 from .player import Player
 from .utils import load_sound, asset_path, clamp
 
+
 class Game:
     def __init__(self):
         pygame.init()
         pygame.mixer.init()
 
-        # --- Window (scaled) + render surface (logical) ---
-        self.window = pygame.display.set_mode(
-            (settings.WIDTH * settings.SCALE, settings.HEIGHT * settings.SCALE)
-        )
+        # ---------------------------------------------------------------------
+        # Fixed OS window + separate logical "world" surface
+        #
+        # - Window stays constant: settings.WINDOW_WIDTH x settings.WINDOW_HEIGHT
+        # - World is rendered at: settings.RENDER_WIDTH x settings.RENDER_HEIGHT
+        # - World is then scaled to the window each frame
+        # - Menu + UI are drawn directly onto the window (not scaled)
+        # ---------------------------------------------------------------------
+        self.window = pygame.display.set_mode((settings.WINDOW_WIDTH, settings.WINDOW_HEIGHT))
         pygame.display.set_caption("Run & Gun Prototype (Pygame-CE)")
 
-        # Draw everything to this surface first (same coords as before)
-        self.screen = pygame.Surface((settings.WIDTH, settings.HEIGHT)).convert_alpha()
+        # Draw world/gameplay to this logical surface (scaled up when presenting)
+        self.world = pygame.Surface((settings.RENDER_WIDTH, settings.RENDER_HEIGHT)).convert()
 
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("consolas", 22)
@@ -46,14 +52,14 @@ class Game:
         self.state = "START"  # START, PLAYING, GAME_OVER, LEVEL_COMPLETE
         self.running = True
 
-        # Camera
+        # Camera (in WORLD/logical pixels)
         self.camera_x = 0.0
         self.camera_y = 0.0
 
         # World content
         self.level_index = 1
-        self.level = None
-        self.player = None
+        self.level: Level | None = None
+        self.player: Player | None = None
 
         self.bullets = pygame.sprite.Group()
         self.boss_bullets = pygame.sprite.Group()
@@ -75,7 +81,7 @@ class Game:
     def run(self) -> None:
         while self.running:
             dt = self.clock.tick(settings.FPS) / 1000.0
-            dt = min(dt, 1/30)  # clamp if debugging causes huge dt
+            dt = min(dt, 1 / 30)  # clamp if debugging causes huge dt
 
             self.handle_events()
             self.update(dt)
@@ -108,22 +114,27 @@ class Game:
                         self.state = "PLAYING"
 
                 if self.state == "PLAYING":
-                    if event.key in (pygame.K_w, pygame.K_SPACE):
+                    # self.player is guaranteed in PLAYING
+                    if event.key == pygame.K_w:
                         self.player.queue_jump()
 
-                    if event.key == pygame.K_j:
+                    if event.key == pygame.K_SPACE:
                         fired = self.player.try_shoot(self.bullets)
                         if fired and not settings.SOUND_OFF:
                             self.sfx_shoot.play()
 
             if event.type == pygame.KEYUP and self.state == "PLAYING":
-                if event.key in (pygame.K_w, pygame.K_SPACE):
+                if event.key == pygame.K_w:
                     self.player.cut_jump()
 
     # ------------------ Update ------------------
     def update(self, dt: float) -> None:
         if self.state != "PLAYING":
             return
+
+        # Safety: these exist when PLAYING
+        assert self.level is not None
+        assert self.player is not None
 
         keys = pygame.key.get_pressed()
         self.player.handle_input(keys)
@@ -180,107 +191,124 @@ class Game:
             self.state = "LEVEL_COMPLETE"
 
         # --- Camera follow (simple smooth lerp)
-        target_x = self.player.rect.centerx - settings.WIDTH * 0.5
-        target_y = self.player.rect.centery - settings.HEIGHT * 0.6
-        target_x = clamp(target_x, 0, max(0, self.level.pixel_width - settings.WIDTH))
-        target_y = clamp(target_y, 0, max(0, self.level.pixel_height - settings.HEIGHT))
+        # IMPORTANT: use world/logical viewport size, not the window size.
+        vw, vh = settings.RENDER_WIDTH, settings.RENDER_HEIGHT
+
+        target_x = self.player.rect.centerx - vw * 0.5
+        target_y = self.player.rect.centery - vh * 0.6
+        target_x = clamp(target_x, 0, max(0, self.level.pixel_width - vw))
+        target_y = clamp(target_y, 0, max(0, self.level.pixel_height - vh))
 
         self.camera_x += (target_x - self.camera_x) * settings.CAMERA_LERP
         self.camera_y += (target_y - self.camera_y) * settings.CAMERA_LERP
 
     # ------------------ Draw ------------------
     def draw(self) -> None:
-        self.screen.fill((20, 22, 30))
-
+        # START screen + UI should be fixed-size, so they draw directly to the window.
         if self.state == "START":
-            self.draw_center_text("RUN & GUN PROTOTYPE", y=170, big=True)
-            self.draw_center_text("Press ENTER to start", y=260)
-            self.draw_center_text("A/D move, W/Space jump, J shoot", y=310)
-
-            # --- present scaled frame ---
-            scaled = pygame.transform.scale(
-                self.screen,
-                (settings.WIDTH * settings.SCALE, settings.HEIGHT * settings.SCALE)
-            )
-            self.window.blit(scaled, (0, 0))
+            self.window.fill((20, 22, 30))
+            self.draw_center_text("RUN & GUN PROTOTYPE", y=170, big=True, target=self.window)
+            self.draw_center_text("Press ENTER to start", y=260, target=self.window)
+            self.draw_center_text("A/D move, W jump, SPACE shoot", y=310, target=self.window)
             pygame.display.flip()
             return
 
-        # World
-        self.level.draw(self.screen, self.camera_x, self.camera_y)
+        # Safety: level/player exist for all non-start states in this prototype
+        assert self.level is not None
+        assert self.player is not None
+
+        # ---------- WORLD (draw to logical surface, then scale up) ----------
+        self.world.fill((20, 22, 30))
+
+        # World / tiles
+        self.level.draw(self.world, self.camera_x, self.camera_y)
 
         # Entities
-        # (Draw order: pickups -> enemies -> boss -> bullets -> player -> UI)
+        # (Draw order: pickups -> enemies -> boss -> bullets -> player)
         for p in self.level.pickups:
-            self.screen.blit(p.image, (p.rect.x - self.camera_x, p.rect.y - self.camera_y))
+            self.world.blit(p.image, (p.rect.x - self.camera_x, p.rect.y - self.camera_y))
 
         for e in self.level.enemies:
-            self.screen.blit(e.image, (e.rect.x - self.camera_x, e.rect.y - self.camera_y))
+            self.world.blit(e.image, (e.rect.x - self.camera_x, e.rect.y - self.camera_y))
 
         if self.level.boss and self.level.boss.alive():
-            self.screen.blit(
+            self.world.blit(
                 self.level.boss.image,
-                (self.level.boss.rect.x - self.camera_x, self.level.boss.rect.y - self.camera_y)
+                (self.level.boss.rect.x - self.camera_x, self.level.boss.rect.y - self.camera_y),
             )
 
         for b in self.bullets:
-            self.screen.blit(b.image, (b.rect.x - self.camera_x, b.rect.y - self.camera_y))
+            self.world.blit(b.image, (b.rect.x - self.camera_x, b.rect.y - self.camera_y))
 
         for b in self.boss_bullets:
-            self.screen.blit(b.image, (b.rect.x - self.camera_x, b.rect.y - self.camera_y))
+            self.world.blit(b.image, (b.rect.x - self.camera_x, b.rect.y - self.camera_y))
 
         # Player (blink if invulnerable)
         if self.player.invuln_time <= 0 or int(self.player.invuln_time * 20) % 2 == 0:
-            self.screen.blit(
+            self.world.blit(
                 self.player.image,
-                (self.player.rect.x - self.camera_x, self.player.rect.y - self.camera_y)
+                (self.player.rect.x - self.camera_x, self.player.rect.y - self.camera_y),
             )
 
-        # UI overlay
-        self.draw_ui()
+        # Present scaled world into fixed window
+        scaled_world = pygame.transform.scale(self.world, (settings.WINDOW_WIDTH, settings.WINDOW_HEIGHT))
+        self.window.blit(scaled_world, (0, 0))
+
+        # ---------- UI + overlays (draw directly to window; not scaled) ----------
+        self.draw_ui(target=self.window)
 
         if self.state == "GAME_OVER":
-            self.draw_overlay()
-            self.draw_center_text("GAME OVER", y=220, big=True)
-            self.draw_center_text("Press R to restart", y=290)
-        elif self.state == "LEVEL_COMPLETE":
-            self.draw_overlay()
-            self.draw_center_text("LEVEL COMPLETE!", y=220, big=True)
-            self.draw_center_text("Press ENTER to replay (add more levels!)", y=290)
+            self.draw_overlay(target=self.window)
+            self.draw_center_text("GAME OVER", y=220, big=True, target=self.window)
+            self.draw_center_text("Press R to restart", y=290, target=self.window)
 
-        # --- present scaled frame ---
-        scaled = pygame.transform.scale(
-            self.screen,
-            (settings.WIDTH * settings.SCALE, settings.HEIGHT * settings.SCALE)
-        )
-        self.window.blit(scaled, (0, 0))
+        elif self.state == "LEVEL_COMPLETE":
+            self.draw_overlay(target=self.window)
+            self.draw_center_text("LEVEL COMPLETE!", y=220, big=True, target=self.window)
+            self.draw_center_text("Press ENTER to replay (add more levels!)", y=290, target=self.window)
+            
+        # DEBUG: show all idle frames in a row
+        if self.state == "PLAYING":
+            x = 50
+            y = settings.WINDOW_HEIGHT - 80
+
+            for frame in self.player.anim_idle:
+                img = pygame.transform.scale(frame, (frame.get_width() * 2, frame.get_height() * 2))
+                self.window.blit(img, (x, y))
+                x += img.get_width() + 10
+
         pygame.display.flip()
 
-    def draw_ui(self) -> None:
-        # Health bar
+    # ------------------ UI helpers ------------------
+    def draw_ui(self, target: pygame.Surface) -> None:
+        # Health bar (fixed window coords)
         x, y, w, h = 20, 20, 220, 18
-        pygame.draw.rect(self.screen, (50, 50, 50), (x, y, w, h))
-        hp_ratio = self.player.health / self.player.max_health
-        pygame.draw.rect(self.screen, (80, 220, 120), (x, y, int(w * hp_ratio), h))
+        pygame.draw.rect(target, (50, 50, 50), (x, y, w, h))
+        hp_ratio = self.player.health / self.player.max_health if self.player.max_health > 0 else 0
+        pygame.draw.rect(target, (80, 220, 120), (x, y, int(w * hp_ratio), h))
         txt = self.font.render(f"HP: {self.player.health}/{self.player.max_health}", True, (230, 230, 230))
-        self.screen.blit(txt, (x, y + 22))
+        target.blit(txt, (x, y + 22))
 
         # Boss health (when alive)
-        if self.level.boss and self.level.boss.alive(): 
-            bx, by, bw, bh = settings.WIDTH - 280, 20, 260, 14
-            pygame.draw.rect(self.screen, (50, 50, 50), (bx, by, bw, bh))
-            ratio = self.level.boss.health / self.level.boss.max_health
-            pygame.draw.rect(self.screen, (220, 90, 160), (bx, by, int(bw * ratio), bh))
+        if self.level.boss and self.level.boss.alive():
+            bx, by, bw, bh = settings.WINDOW_WIDTH - 280, 20, 260, 14
+            pygame.draw.rect(target, (50, 50, 50), (bx, by, bw, bh))
+            ratio = self.level.boss.health / self.level.boss.max_health if self.level.boss.max_health > 0 else 0
+            pygame.draw.rect(target, (220, 90, 160), (bx, by, int(bw * ratio), bh))
             t = self.font.render("BOSS", True, (230, 230, 230))
-            self.screen.blit(t, (bx, by + 18))
+            target.blit(t, (bx, by + 18))
 
-    def draw_center_text(self, text: str, y: int, big: bool = False) -> None:
+    def draw_center_text(self, text: str, y: int, big: bool = False, target: pygame.Surface | None = None) -> None:
+        if target is None:
+            target = self.window
         f = self.big_font if big else self.font
         surf = f.render(text, True, (240, 240, 240))
-        rect = surf.get_rect(center=(settings.WIDTH//2, y))
-        self.screen.blit(surf, rect)
+        rect = surf.get_rect(center=(settings.WINDOW_WIDTH // 2, y))
+        target.blit(surf, rect)
 
-    def draw_overlay(self) -> None:
-        overlay = pygame.Surface((settings.WIDTH, settings.HEIGHT), pygame.SRCALPHA)
+    def draw_overlay(self, target: pygame.Surface | None = None) -> None:
+        if target is None:
+            target = self.window
+        overlay = pygame.Surface((settings.WINDOW_WIDTH, settings.WINDOW_HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 160))
-        self.screen.blit(overlay, (0, 0))
+        target.blit(overlay, (0, 0))

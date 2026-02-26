@@ -42,8 +42,6 @@ class Level:
         # Slice the tilesheet into individual tile images
         self.tiles = self.slice_tilesheet(self.tilesheet, settings.TILE_SIZE)
 
-        print(len(self.tiles))  # Debug: check that tiles are loaded correctly
-
         # Decide which tile IDs are solid (collidable)
         self.solid_ids = {self.SOLID_01, self.SOLID_02, self.SOLID_03}
 
@@ -89,8 +87,7 @@ class Level:
         cols = sheet_w // tile_size
         rows = sheet_h // tile_size
         
-        print(f"Slicing tilesheet: {cols} cols x {rows} rows = {cols * rows} tiles")  # Debug
-
+        
         tiles: list[pygame.Surface] = []
         for y in range(rows):
             for x in range(cols):

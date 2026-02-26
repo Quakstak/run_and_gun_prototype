@@ -8,22 +8,30 @@ from __future__ import annotations
 import pygame
 from .utils import load_image, slice_sprite_sheet_row
 from .weapon import Weapon
+from .animation import Animation
 from . import settings
 
 
 class Player(pygame.sprite.Sprite):
     def __init__(self, pos: tuple[int, int]):
         super().__init__()
-
-        # Sprite sheet: row 0 idle, row 1 run, row 2 jump
+        
+        # Sprite sheet: row 4 idle, row 3 run, row 5 jump
+        
         sheet = load_image("player_sheet.png")
-        self.anim_idle = slice_sprite_sheet_row(sheet, 4, 32, 32, 6)
-        self.anim_run  = slice_sprite_sheet_row(sheet, 3, 32, 32, 8)
-        self.anim_jump = slice_sprite_sheet_row(sheet, 5, 32, 32, 8)
+        self.anim_idle = slice_sprite_sheet_row(sheet, row=4, frame_w=32, frame_h=32, num_frames=6, stride_x=32, start_x=0, start_y=0, clamp=True)
+        self.anim_run  = slice_sprite_sheet_row(sheet, row=3, frame_w=32, frame_h=32, num_frames=8, stride_x=32, start_x=0, start_y=0, clamp=True)
+        self.anim_jump = slice_sprite_sheet_row(sheet, row=5, frame_w=32, frame_h=32, num_frames=8, stride_x=32, start_x=0, start_y=0, clamp=True)
+
+        # If idle has only 1 frame, you will never see animation.
+        # This warns early (common cause of "idle doesn't animate").
+        if len(self.anim_idle) < 2:
+            print("[WARN] anim_idle has <2 frames. Check slice_sprite_sheet_row row/count arguments.")
 
         self.image = self.anim_idle[0]
         self.rect = self.image.get_rect(topleft=pos)
-
+        self.pos = pygame.Vector2(self.rect.topleft)  # float position
+        
         # Physics
         self.vel = pygame.Vector2(0.0, 0.0)
         self.on_ground = False
@@ -42,10 +50,13 @@ class Player(pygame.sprite.Sprite):
         self.max_health = settings.PLAYER_MAX_HEALTH
         self.invuln_time = 0.0
 
-        # Animation
-        self.frame_i = 0
-        self.frame_time = 0.0
-        self.current_anim = self.anim_idle
+        # Animation (SLOW + readable by default)
+        # Increase frame_duration to slow down.
+        self.idle_anim = Animation(self.anim_idle, frame_duration=0.15, loop=True)  # very readable
+        self.run_anim  = Animation(self.anim_run,  frame_duration=0.20, loop=True)  # slowed run
+        self.jump_anim = Animation(self.anim_jump, frame_duration=0.12, loop=True)
+
+        self.current_anim = self.idle_anim
 
     # --------------------------
     # Health
@@ -72,13 +83,16 @@ class Player(pygame.sprite.Sprite):
     def handle_input(self, keys: pygame.key.ScancodeWrapper) -> None:
         self.vel.x = 0.0
 
+        self.moving = False
         if keys[pygame.K_a]:
             self.vel.x -= settings.PLAYER_SPEED
             self.facing = -1
+            self.moving = True
 
         if keys[pygame.K_d]:
             self.vel.x += settings.PLAYER_SPEED
             self.facing = 1
+            self.moving = True
 
     def queue_jump(self) -> None:
         """Called on key press. Stores jump for short time."""
@@ -103,7 +117,6 @@ class Player(pygame.sprite.Sprite):
     # --------------------------
 
     def update(self, dt: float, level) -> None:
-
         # Timers
         if self.invuln_time > 0:
             self.invuln_time = max(0.0, self.invuln_time - dt)
@@ -119,20 +132,24 @@ class Player(pygame.sprite.Sprite):
         # Gravity
         self.vel.y += settings.GRAVITY * dt
 
-        # Horizontal movement
-        self.rect.x += int(self.vel.x * dt)
+        # Horizontal movement (float)
+        self.pos.x += self.vel.x * dt
+        self.rect.x = round(self.pos.x)
+
         hits = level.get_solid_hits(self.rect)
         for tile_rect in hits:
             if self.vel.x > 0:
                 self.rect.right = tile_rect.left
             elif self.vel.x < 0:
                 self.rect.left = tile_rect.right
+            self.pos.x = self.rect.x  # keep float in sync after collision
 
-        # Vertical movement
-        self.rect.y += int(self.vel.y * dt)
+        # Vertical movement (float)
+        self.pos.y += self.vel.y * dt
+        self.rect.y = round(self.pos.y)
+
         self.on_ground = False
         hits = level.get_solid_hits(self.rect)
-
         for tile_rect in hits:
             if self.vel.y > 0:
                 self.rect.bottom = tile_rect.top
@@ -141,6 +158,14 @@ class Player(pygame.sprite.Sprite):
             elif self.vel.y < 0:
                 self.rect.top = tile_rect.bottom
                 self.vel.y = 0
+
+            self.pos.y = self.rect.y  # keep float in sync after collision
+
+        # --- Ground probe (stabilises grounding when perfectly still) ---
+        if not self.on_ground:
+            probe = self.rect.move(0, 1)
+            if level.get_solid_hits(probe):
+                self.on_ground = True
 
         # Coyote time reset
         if self.on_ground:
@@ -154,32 +179,28 @@ class Player(pygame.sprite.Sprite):
             self.coyote_timer = 0.0
             self.jump_buffer = 0.0
 
-        # Animation
+        # Animation selection
         if not self.on_ground:
-            self.set_anim(self.anim_jump, dt, speed=1.0)
-        elif abs(self.vel.x) > 1:
-            self.set_anim(self.anim_run, dt, speed=1.0)
+            self.set_anim(self.jump_anim, dt)
+        elif self.moving:
+            self.set_anim(self.run_anim, dt)
         else:
-            self.set_anim(self.anim_idle, dt, speed=1.0)
+            self.set_anim(self.idle_anim, dt)
 
     # --------------------------
     # Animation helper
     # --------------------------
 
-    def set_anim(self, frames: list[pygame.Surface], dt: float, speed: float) -> None:
-        if self.current_anim is not frames:
-            self.current_anim = frames
-            self.frame_i = 0
-            self.frame_time = 0.0
+    def set_anim(self, anim: Animation, dt: float, speed: float = 1.0) -> None:
+        # Only reset when the animation OBJECT changes
+        if self.current_anim is not anim:
+            self.current_anim = anim
+            self.current_anim.reset()
+            
 
-        self.frame_time += dt * speed
-        if self.frame_time >= 1.0:
-            self.frame_time = 0.0
-            self.frame_i = (self.frame_i + 1) % len(frames)
+        self.current_anim.update(dt, speed=speed)
 
-        img = frames[self.frame_i]
-
+        img = self.current_anim.image
         if self.facing == -1:
             img = pygame.transform.flip(img, True, False)
-
         self.image = img

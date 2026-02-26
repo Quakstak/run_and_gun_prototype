@@ -11,7 +11,7 @@ class PickUp(pygame.sprite.Sprite):
         self.kind = kind
 
         sheet = load_image("pickup_sheet.png")
-        self.frames = slice_sprite_sheet_row(sheet, row=0, frame_w=32, frame_h=32, num_frames=2)
+        self.frames = slice_sprite_sheet_row(sheet, row=0, frame_w=32, frame_h=32, num_frames=2, stride_x=32, start_x=0, start_y=0, clamp=True)
         self.frame_i = 0
         self.frame_time = 0.0
 
