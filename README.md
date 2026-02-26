@@ -13,8 +13,8 @@ A small **teaching-friendly** prototype for a first-year *run-and-gun* side-scro
 
 ## Controls
 - **A/D**: Move
-- **W / Space**: Jump
-- **J**: Shoot
+- **W**: Jump
+- **Space**: Shoot
 - **Enter**: Start / Continue
 - **R**: Restart on Game Over
 - **Esc**: Quit
@@ -35,21 +35,17 @@ Each cell is one tile (32x32).
 Legend:
 
 * `00` empty
-* `01` solid tile type A
-* `02` solid tile type B
-* `03` solid tile type C
-* `04` non-solid tile type 1
+* `01` Ground
+* `02` Platform
+* `03` Platform Left Edge
+* `04` Platform Right Edge
+* `05` Wall
 * `90` player spawn
-* `91` normal enemy
+* `91` runner enemy
 * `92` health pickup
 * `93` boss spawn
 * `94` exit
+* `95` shooter enemy
 
 Edit: `assets/levels/level1.csv`
 
-## Teaching extension ideas
-- Add a second weapon type (spread shot / charge shot)
-- Add moving platforms
-- Add hazards (spikes, pits)
-- Add enemy behaviours (patrol, ranged, flying)
-- Add multiple levels + level select
