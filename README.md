@@ -24,6 +24,8 @@ A small **teaching-friendly** prototype for a first-year *run-and-gun* side-scro
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
+.venv\Scripts\activate
+
 
 pip install -r requirements.txt
 python -m src.main
